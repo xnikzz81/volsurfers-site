@@ -63,6 +63,16 @@
   .page-wrap{ max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
 
   .home-title{ padding: 8px 0 28px; }
+  .live-badge{
+    display:inline-flex; align-items:center; gap:8px; margin-top:18px;
+    font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--ink-dim);
+    background:rgba(255,255,255,0.03); border:1px solid var(--panel-border);
+    border-radius:999px; padding:7px 14px;
+  }
+  .live-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; animation:livePulse 1.8s ease-in-out infinite; }
+  .live-dot.long{ background:#5fc9d1; box-shadow:0 0 6px rgba(95,201,209,0.8); }
+  .live-dot.cash{ background:#ff7a68; box-shadow:0 0 6px rgba(255,122,104,0.8); }
+  @keyframes livePulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
   .home-eyebrow{ font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--accent-long); margin-bottom:12px; }
   .home-h1{ font-family:'Space Grotesk', sans-serif; font-size:40px; font-weight:700; line-height:1.15; max-width:680px; background:linear-gradient(115deg, #f4fafc 45%, #a9d8e0 78%, #6fb8c9 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .home-sub{ font-size:15px; color:var(--ink-dim); max-width:600px; margin-top:16px; line-height:1.6; }
@@ -238,6 +248,7 @@
     <div class="home-title">
       <div class="home-eyebrow">Systematic crypto signals</div>
       <div class="home-h1">Investing in Crypto shouldn't feel like gambling.</div>
+      <div class="live-badge" id="liveSignalBadge">Checking live signal…</div>
     </div>
 
     <div class="btc-anim-panel">
@@ -6338,6 +6349,56 @@ startInput.addEventListener('change', ()=> runBacktest(startInput.value));
 
 renderLive();
 runBacktest(startInput.value);
+
+// ---------- Phase 3: pull the REAL live signal from TradingView (via our webhook) ----------
+// If this succeeds, it overrides the state/price/date on the BTC page (once live)
+// and fills in the small live badge on the Home page.
+// If it fails or nothing's been received yet, everything safely falls back to
+// the client-computed historical state - nothing ever breaks because of this.
+async function fetchLiveSignal(){
+  const badge = document.getElementById('liveSignalBadge');
+  try {
+    const res = await fetch('/api/latest-signal', { cache: 'no-store' });
+    const data = await res.json();
+    if(!data || (data.state !== 'LONG' && data.state !== 'CASH')){
+      if(badge) badge.textContent = 'No live signal received yet';
+      return;
+    }
+
+    applyState(data.state);
+
+    const priceEl = document.getElementById('btcPrice');
+    if(priceEl && data.price) priceEl.textContent = '$'+Number(data.price).toLocaleString(undefined,{maximumFractionDigits:0});
+
+    const lastEl = document.getElementById('lastSignalTime');
+    const metaEl = document.getElementById('stateMeta');
+    let dateStr = '';
+    if(data.time){
+      const signalDate = new Date(data.time);
+      dateStr = signalDate.toISOString().slice(0,10);
+      if(lastEl) lastEl.textContent = dateStr;
+      if(metaEl){
+        const days = Math.max(0, Math.round((Date.now()-signalDate.getTime())/86400000));
+        metaEl.textContent = `in state for ${days} days · since ${dateStr} (live)`;
+      }
+    }
+
+    // Home page badge
+    if(badge){
+      badge.innerHTML = '';
+      const dot = document.createElement('span');
+      dot.className = 'live-dot ' + (data.state==='LONG' ? 'long' : 'cash');
+      const label = document.createElement('span');
+      label.textContent = `Live signal: ${data.state}` + (dateStr ? ` · since ${dateStr}` : '');
+      badge.appendChild(dot);
+      badge.appendChild(label);
+    }
+  } catch(e){
+    if(badge) badge.textContent = 'Live signal unavailable right now';
+    console.warn('Live signal fetch failed, showing historical state instead.', e);
+  }
+}
+fetchLiveSignal();
 
 // ---------- page routing ----------
 function showPage(id){
